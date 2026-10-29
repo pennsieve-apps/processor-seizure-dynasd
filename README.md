@@ -147,6 +147,23 @@ What this says:
   were chosen on these same 24 seizures from a small grid (threshold mean/median/per-recording
   GMM × k = 1–3 × search start), so the numbers are in-sample. They are not tuned per patient.
 
+**On the ieeg-prep derivative** (`workflow-epilepsy-ieeg/data/work/prep/ieeg`: the same 24
+clips, bipolar with bad channels marked, `onset_s` = the expert consensus onset, baseline =
+recording start to onset − 10 s, at most 90 s). Because `onset_s` there *is* the expert onset,
+anchoring on it is optimistic; the honest number is the onset-blind run (onset and baseline
+removed from the input: baseline = first 60 s, search everything after it):
+
+| Run | \|error\| median; ≤ 5 s; ≤ 10 s | signed error median [range] | AUC median [range] | precision / recall |
+|---|---|---|---|---|
+| default, search from 30 s before the **expert** onset (optimistic) | 5.0 s; 12/24; 15/24 | −3.9 [−29.0, 59.5] | 0.98 [0.49, 1.00] | 0.33 / 0.63 |
+| … spontaneous (18) / stimulation-induced (6) | 3.9 s; 12/18; 15/18 / 25.8 s; 0/6; 0/6 | | 0.98 / 0.90 | 0.36 / 0.71 ; 0 / 0 |
+| `SEARCH_BEFORE_S=-1` (search from the end of ieeg-prep's baseline, which still ends 10 s before the expert onset) | 5.8 s; 11/24; 13/24 | −4.4 [−31.4, 59.5] | 0.98 [0.47, 1.00] | 0.33 / 0.60 |
+| **onset-blind** (no `onset_s`, no baseline in the input) | 17.7 s; 9/24; 11/24 | −11.0 [−70.2, 23.5] | 0.97 [0.42, 1.00] | 0.29 / 0.71 |
+
+These match the raw-clip runs above (default 5.0 s / AUC 0.98; unanchored 17.7 s / 0.97): the
+channel ranking holds up without any onset information, the onset *time* needs a rough
+clinical mark to be within seconds.
+
 **Compared with the preprint.** Ojemann et al. evaluated on the same kind of data (HUP SEEG,
 consensus of five epileptologists; 46 seizures of 23 patients) but report channel-level
 metrics, not an onset-time error: for LiNDDA onset-channel AUROC 0.88 ± 0.06, AUPRC 0.47 ± 0.11,
@@ -172,6 +189,7 @@ other jobs running on the host):
 | LiNDDA (default) | 3 demo clips: 208 ch / 338 s, 116 ch / 386 s, 106 ch / 463 s | 38.8, 19.5, 16.9 s (88 s run) | 1.60 GB |
 | NDD | 1 clip, 116 ch / 386 s | 28.9 s | 2.19 GB |
 | ONCET | 1 clip, 116 ch / 386 s | 279 s | 1.84 GB |
+| LiNDDA (default), no other load | all 24 ieeg-prep clips (72–204 channels) | 240 s for the run, ~10 s per clip | — |
 
 Natively (arm64, same Mac) all 24 demo clips take ~2 min with LiNDDA (5–10 s each);
 ONCET takes 1.5–7 min per clip natively, even after rewriting its dilated convolutions as

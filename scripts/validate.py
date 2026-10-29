@@ -1,7 +1,7 @@
 """
 Scores this app's output against expert labels (development tool; not in the image).
 
-  python scripts/validate.py <output-dir> <truth>
+  python scripts/validate.py <output-dir> <truth> [annotations.tsv]
 
 <truth> is either
   - the Multi-Expert Seizure Annotation dataset folder (Discover 530; has annotations.tsv):
@@ -66,14 +66,38 @@ def truth_from_derivative(folder: Path) -> dict:
     return out
 
 
+def add_flags(truth: dict, annotations: Path) -> None:
+    """lvfa / stim flags from the Multi-Expert annotations.tsv for a derivative's recordings."""
+    flags = truth_from_annotations_rows(annotations)
+    for rid, t in truth.items():
+        f = flags.get(rid)
+        if f:
+            t["lvfa"], t["stim"] = f
+
+
+def truth_from_annotations_rows(annotations: Path) -> dict:
+    rows = list(csv.DictReader(open(annotations, encoding="utf-8-sig"), delimiter="\t"))
+    out = {}
+    for r in rows:
+        out[(r["patient"], int(float(r["approximate_onset"])))] = (r["lvfa"] == "yes", r["stim"])
+
+    class Lookup(dict):
+        def get(self, rid, default=None):
+            m = re.match(r"sub-([A-Za-z0-9]+)_.*task-[a-z]+(\d+)", rid)
+            return out.get((m.group(1), int(m.group(2)))) if m else default
+    return Lookup()
+
+
 def is_onset(t: dict, channel: str) -> bool | None:
     if "labels" in t:
         return t["labels"].get(channel)
     return bool(set(channel.split("-")) & t["contacts"])
 
 
-def main(out_dir: Path, truth_dir: Path) -> None:
+def main(out_dir: Path, truth_dir: Path, annotations: Path | None = None) -> None:
     truth = truth_from_annotations(truth_dir) if (truth_dir / "annotations.tsv").exists() else truth_from_derivative(truth_dir)
+    if annotations is not None:
+        add_flags(truth, annotations)
     onsets = {r["recording_id"]: (float(r["onset_s"]) if r["onset_s"] else None)
               for r in csv.DictReader(open(out_dir / "seizure_onsets.csv"))}
     chans: dict[str, list[dict]] = {}
@@ -115,4 +139,4 @@ def main(out_dir: Path, truth_dir: Path) -> None:
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]), Path(sys.argv[2]))
+    main(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]) if len(sys.argv) > 3 else None)
