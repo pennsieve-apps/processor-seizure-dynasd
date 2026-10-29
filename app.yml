@@ -7,7 +7,8 @@ application:
     ECoG). Wraps DynaSD (Ojemann et al. 2026): a model of each recording's own pre-ictal
     dynamics (by default LiNDDA, a linear vector autoregressive forecaster) is fitted on the
     baseline, and the seizure is where the signals stop following it. Writes the recording-level
-    onset and, per channel, its onset time, whether it is recruited at onset, and a score.
+    onset and, per channel, its onset time, whether it is recruited at onset, and a score. Runs
+    on CPU or, for the slow pretrained ONCET model, on the gpu runtime (DEVICE=auto).
   type: processor
   tags:
     - ieeg
@@ -19,13 +20,17 @@ application:
     - seizure-onset
     - machine-learning
 runtime:
-  # One recording at a time, PyTorch on CPU. On the demo (SEEG clips, 106-208 bipolar channels,
-  # 1024 Hz, 5.6-7.7 min) LiNDDA takes 17-39 s per clip and peaks at 1.6 GB, NDD 29 s / 2.2 GB,
+  # One recording at a time. On the demo (SEEG clips, 106-208 bipolar channels, 1024 Hz,
+  # 5.6-7.7 min) on CPU LiNDDA takes 17-39 s per clip and peaks at 1.6 GB, NDD 29 s / 2.2 GB,
   # ONCET ~5 min / 1.8 GB (amd64 emulation on an M-series Mac; see README "Runtime").
+  # One image (CUDA PyTorch) for both runtimes: standard = CPU Fargate task; gpu = EC2 g4dn.xlarge
+  # (NVIDIA T4 16 GB, 4 vCPU, ~15 GB for tasks), where DEVICE=auto puts the models on the GPU.
+  # 4 vCPU / 8 GiB fits both (the gpu tier caps memory at 15360 MiB).
   cpu: 4096
   memory: 8192
   computeTypes:
     - standard
+    - gpu
   timeoutSeconds: 14400
 parameters:
   - name: MODEL
@@ -35,7 +40,8 @@ parameters:
       lindda (default): linear forecaster of the baseline dynamics, the preprint's best
       intracranial model; ndd: the same with an LSTM forecaster; absslp: baseline-normalised
       absolute slope (Schindler et al. 2007), no training; oncet: DynaSD's pretrained
-      convolutional seizure classifier (bundled checkpoint; slow on CPU, minutes per recording).
+      convolutional seizure classifier (bundled checkpoint; slow on CPU, ~5 min per recording:
+      run it on the gpu runtime).
     defaultValue: lindda
     validValues: [lindda, ndd, absslp, oncet]
   - name: THRESHOLD
@@ -106,6 +112,26 @@ parameters:
     label: Random seed
     description: Seed for the forecaster's initial weights and training order (LiNDDA, NDD).
     defaultValue: 42
+  - name: DEVICE
+    type: string
+    label: Device
+    description: >-
+      Where PyTorch runs: auto picks cuda when the step has a GPU (the gpu runtime) and cpu
+      otherwise; cuda on a host without a GPU falls back to cpu with a warning. Worth a GPU for
+      ONCET (an estimated 20-50x faster); LiNDDA, the default, is fast on CPU. CPU results are
+      the same as v0.1.0's; on a GPU float32 scores differ in the last digits. Logged and
+      recorded in provenance.json.
+    defaultValue: auto
+    validValues: [auto, cuda, cpu]
+  - name: BATCH
+    type: integer
+    label: ONCET batch size
+    description: >-
+      Windows per ONCET forward pass; 0 = automatic (8192 on a GPU, sized for a 16 GB T4;
+      128 on CPU). Does not change the results beyond float rounding. LiNDDA's and NDD's
+      batch sizes are training settings and stay fixed.
+    defaultValue: 0
+    min: 0
 inputs:
   - name: ieeg
     description: >-

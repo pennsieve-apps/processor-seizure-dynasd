@@ -1,7 +1,7 @@
-# Runtime dependencies, resolved on python:3.12.16-slim-bookworm (linux/amd64).
-# PyTorch is the CPU-only build (no CUDA libraries) from the PyTorch wheel index.
+# Runtime dependencies, resolved on python:3.12.16-slim-bookworm (linux/amd64), except PyTorch:
+# the Dockerfile adds requirements-cuda.txt (default: the image the platform builds, runs on GPU
+# and CPU) or requirements-cpu.txt (TORCH_FLAVOUR=cpu: the small CPU-only image of v0.1.0).
 # DynaSD itself is installed from a pinned commit in the Dockerfile (not on PyPI yet).
---extra-index-url https://download.pytorch.org/whl/cpu
 certifi==2026.10.23
 charset-normalizer==3.5.2
 cloudpickle==3.1.2
@@ -36,7 +36,6 @@ scipy==1.18.1
 six==1.17.0
 sympy==1.14.0
 threadpoolctl==3.7.0
-torch==2.11.0+cpu
 tqdm==4.70.1
 typing_extensions==4.16.0
 tzdata==2026.6

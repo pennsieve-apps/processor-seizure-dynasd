@@ -16,7 +16,10 @@ from processor import main as M
 from tests import make_fixture
 
 PARAMS = ("MODEL", "THRESHOLD", "FILTER_W", "RWIN_SIZE", "RWIN_REQ", "MIN_CHANNELS", "ONSET_WINDOW_S",
-          "SCORE_WINDOW_S", "SEARCH_BEFORE_S", "BASELINE_S", "SEED")
+          "SCORE_WINDOW_S", "SEARCH_BEFORE_S", "BASELINE_S", "SEED", "DEVICE", "BATCH", "DYNASD_CHECKPOINTS")
+GOLDEN = Path(__file__).parent / "golden"
+# ONCET's checkpoint: DYNASD_CHECKPOINTS, else data/checkpoints/ (copy /opt/dynasd/ONCET out of the image)
+CHECKPOINTS = Path(__import__("os").environ.get("DYNASD_CHECKPOINTS") or Path(__file__).parent.parent / "data" / "checkpoints")
 
 
 @pytest.fixture(scope="module")
@@ -181,6 +184,135 @@ def test_no_input_fails(tmp_path, monkeypatch):
     assert run(monkeypatch, empty, tmp_path / "out") == 1
 
 
-@pytest.mark.parametrize("env", [{"MODEL": "wvnt"}, {"THRESHOLD": "high"}, {"RWIN_REQ": "6"}, {"MIN_CHANNELS": "x"}])
+@pytest.mark.parametrize("env", [{"MODEL": "wvnt"}, {"THRESHOLD": "high"}, {"RWIN_REQ": "6"}, {"MIN_CHANNELS": "x"},
+                                 {"DEVICE": "gpu"}, {"BATCH": "-1"}])
 def test_bad_parameters(fixture_dir, tmp_path, monkeypatch, env):
     assert run(monkeypatch, fixture_dir / "linked", tmp_path / "out", **env) == 2
+
+
+# --- device (DEVICE=auto|cuda|cpu) -----------------------------------------------------
+# There is no GPU in CI or on a Mac: the cuda path is tested by mocking torch.cuda.
+
+@pytest.fixture
+def fake_gpu(monkeypatch):
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda i=0: "Tesla T4")
+    return torch
+
+
+def test_choose_device_without_gpu(monkeypatch):
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert D.choose_device("cpu")[:2] == ("cpu", "cpu")
+    assert D.choose_device("auto")[:2] == ("auto", "cpu")
+    assert D.choose_device("")[:2] == ("auto", "cpu")
+    req, dev, why = D.choose_device("CUDA")          # asked for cuda, none there: falls back
+    assert (req, dev) == ("cuda", "cpu") and "not available" in why
+    with pytest.raises(ValueError):
+        D.choose_device("gpu")
+
+
+def test_choose_device_with_gpu(fake_gpu):
+    assert D.choose_device("auto") == ("auto", "cuda", "DEVICE=auto: using cuda: Tesla T4")
+    assert D.choose_device("cuda")[1] == "cuda"
+    assert D.choose_device("cpu")[1] == "cpu"        # cpu is honoured even with a GPU
+
+
+def test_choose_device_broken_cuda_runtime(monkeypatch):
+    torch = pytest.importorskip("torch")
+
+    def boom():
+        raise RuntimeError("driver too old")
+
+    monkeypatch.setattr(torch.cuda, "is_available", boom)
+    req, dev, why = D.choose_device("auto")
+    assert dev == "cpu" and "driver too old" in why
+
+
+def test_oncet_batch():
+    assert D.oncet_batch(D.Params(device="cpu")) == 128      # v0.1.0's batch on CPU
+    assert D.oncet_batch(D.Params(device="cuda")) == 8192
+    assert D.oncet_batch(D.Params(device="cuda", batch=1000)) == 1000
+
+
+@pytest.mark.parametrize("model", ["lindda", "ndd"])
+def test_forecasters_on_cuda(fake_gpu, model):
+    """LiNDDA and NDD get use_cuda; their (training) batch sizes do not depend on the device."""
+    m_cpu = D.build_model(D.Params(model=model, device="cpu"), 4)
+    m_gpu = D.build_model(D.Params(model=model, device="cuda"), 4)
+    assert m_cpu.device.type == "cpu" and m_gpu.device.type == "cuda"
+    assert m_cpu.batch_size == m_gpu.batch_size
+
+
+@pytest.fixture
+def oncet_checkpoints():
+    if not (CHECKPOINTS / "ONCET" / "best_model.pth").exists():
+        pytest.skip(f"no ONCET checkpoint under {CHECKPOINTS}")
+    return str(CHECKPOINTS)
+
+
+def test_oncet_on_cuda_is_built_for_the_gpu(fake_gpu, monkeypatch, oncet_checkpoints):
+    """
+    DEVICE=cuda: ONCET gets device cuda and the GPU batch, keeps its dilated convolutions (cuDNN),
+    and its windows stay in host memory (upstream would pin a CUDA tensor and fail).
+    """
+    torch = fake_gpu
+    import pandas as pd
+
+    load = torch.load
+    monkeypatch.setattr(torch, "load", lambda f, map_location=None, **kw: load(f, map_location="cpu", **kw))
+    monkeypatch.setattr(torch.nn.Module, "to", lambda self, *a, **kw: self)   # no GPU to move to
+    m = D.build_model(D.Params(model="oncet", device="cuda", checkpoint_dir=oncet_checkpoints), 3)
+    assert m.device == "cuda" and m.batch_size == 8192
+    convs = [c for c in m.model.modules() if isinstance(c, torch.nn.Conv1d)]
+    assert any(c.dilation[0] > 1 for c in convs)
+    x = pd.DataFrame(np.random.default_rng(0).standard_normal((256 * 4, 3)).astype(np.float32), columns=list("abc"))
+    m.fit(x)
+    t = m._prepare_oncet_segment(x)
+    assert t.device.type == "cpu" and t.shape == (7 * 3, 1, 256) and m.device == "cuda"
+
+
+def test_oncet_on_cpu_unchanged(oncet_checkpoints):
+    m = D.build_model(D.Params(model="oncet", device="cpu", checkpoint_dir=oncet_checkpoints), 3)
+    assert m.device == "cpu" and m.batch_size == 128
+    assert all(c.dilation == (1,) for c in m.model.modules() if c.__class__.__name__ == "Conv1d")
+
+
+def test_device_in_provenance_and_cuda_falls_back(fixture_dir, tmp_path, monkeypatch):
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    out = tmp_path / "out"
+    assert run(monkeypatch, fixture_dir / "linked", out, MODEL="absslp", DEVICE="cuda") == 0
+    prov = json.loads((out / "dynasd" / "provenance.json").read_text())
+    assert prov["device"]["requested"] == "cuda" and prov["device"]["used"] == "cpu"
+    assert prov["parameters"]["DEVICE"] == "cuda"
+
+
+# --- CPU results unchanged since v0.1.0 ---------------------------------------------------
+# tests/golden/<model>/ are v0.1.0's outputs on the synthetic fixture (macOS arm64, torch 2.11.0).
+# ONCET flags no channel on the synthetic burst at its pretrained threshold, so it runs with a
+# fixed THRESHOLD=0.99 and MIN_CHANNELS=1 to give scores to compare.
+
+GOLDEN_ENV = {"lindda": {}, "ndd": {}, "absslp": {}, "oncet": {"THRESHOLD": "0.99", "MIN_CHANNELS": "1"}}
+
+
+@pytest.mark.parametrize("model", list(GOLDEN_ENV))
+@pytest.mark.parametrize("device", ["cpu", "auto"])
+def test_cpu_results_match_v0_1_0(fixture_dir, tmp_path, monkeypatch, model, device):
+    env = dict(GOLDEN_ENV[model], MODEL=model, DEVICE=device)
+    if model == "oncet":
+        if not (CHECKPOINTS / "ONCET" / "best_model.pth").exists():
+            pytest.skip(f"no ONCET checkpoint under {CHECKPOINTS}")
+        env["DYNASD_CHECKPOINTS"] = str(CHECKPOINTS)
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    out = tmp_path / "out"
+    assert run(monkeypatch, fixture_dir / "linked", out, **env) == 0
+    for name in ("seizure_onsets.csv", "channel_onsets.csv"):
+        got, want = read_csv(out / "dynasd" / name), read_csv(GOLDEN / model / name)
+        assert len(got) == len(want)
+        for g, w in zip(got, want):
+            assert {k: v for k, v in g.items() if k != "score"} == {k: v for k, v in w.items() if k != "score"}
+            if "score" in w:
+                assert (g["score"] == w["score"]) or abs(float(g["score"]) - float(w["score"])) <= 2e-4

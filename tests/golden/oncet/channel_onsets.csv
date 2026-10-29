@@ -1,0 +1,13 @@
+recording_id,channel,onset_s,recruited,score,method
+sub-01_task-ictal_run-01,A01-A02,,false,0.9882,dynasd-oncet
+sub-01_task-ictal_run-01,A02-A03,,false,0.9947,dynasd-oncet
+sub-01_task-ictal_run-01,A03-A04,,false,0.9930,dynasd-oncet
+sub-01_task-ictal_run-01,B01-B02,,false,0.9468,dynasd-oncet
+sub-01_task-ictal_run-01,B02-B03,,false,0.9532,dynasd-oncet
+sub-01_task-ictal_run-01,B03-B04,,false,0.9584,dynasd-oncet
+sub-01_task-ictal_run-02,A01-A02,,false,0.9886,dynasd-oncet
+sub-01_task-ictal_run-02,A02-A03,,false,0.9937,dynasd-oncet
+sub-01_task-ictal_run-02,A03-A04,,false,0.9944,dynasd-oncet
+sub-01_task-ictal_run-02,B01-B02,,false,0.9489,dynasd-oncet
+sub-01_task-ictal_run-02,B02-B03,,false,0.9509,dynasd-oncet
+sub-01_task-ictal_run-02,B03-B04,,false,0.9502,dynasd-oncet

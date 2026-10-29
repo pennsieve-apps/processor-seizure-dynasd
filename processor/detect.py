@@ -44,6 +44,38 @@ log = logging.getLogger(__name__)
 TARGET_FS = 256
 MODELS = ("lindda", "ndd", "absslp", "oncet")
 METHOD_NAME = {m: f"dynasd-{m}" for m in MODELS}
+DEVICES = ("auto", "cuda", "cpu")
+# ONCET inference batch (windows x channels per forward pass) when BATCH=0 (auto). cpu: what v0.1.0
+# used (results unchanged). cuda: sized for an NVIDIA T4 (16 GB): ONCET is 48 filters x 128 samples
+# per item, ~25 kB per activation, so 8192 items keep well under 1 GB of activations under no_grad.
+ONCET_BATCH = {"cpu": 128, "cuda": 8192}
+
+
+def choose_device(requested: str) -> tuple[str, str, str]:
+    """
+    (normalised DEVICE, device used, one-line reason). `auto` takes cuda when torch sees a GPU and
+    cpu otherwise; an explicit `cuda` on a host without one falls back to cpu (the caller logs a
+    warning) rather than failing: the step still finishes, only slower. As in processor-lst-ai.
+    """
+    requested = (requested or "auto").strip().lower()
+    if requested not in DEVICES:
+        raise ValueError(f"DEVICE={requested!r}: one of {', '.join(DEVICES)}")
+    if requested == "cpu":
+        return requested, "cpu", "DEVICE=cpu: using cpu"
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return requested, "cuda", f"DEVICE={requested}: using cuda: {torch.cuda.get_device_name(0)}"
+        why = "cuda not available"
+    except Exception as exc:  # noqa: BLE001 - a broken CUDA runtime must not take the step down
+        why = f"cuda check failed ({exc})"
+    return requested, "cpu", f"DEVICE={requested}: {why}, using cpu"
+
+
+def oncet_batch(p: "Params") -> int:
+    """ONCET's inference batch: BATCH when set (> 0), else the default for the device."""
+    return p.batch if p.batch > 0 else ONCET_BATCH[p.device]
 
 
 @dataclass
@@ -62,6 +94,8 @@ class Params:
     num_epochs: int = 10
     seed: int = 42
     checkpoint_dir: str | None = None
+    device: str = "cpu"                 # the device used (cpu | cuda), from choose_device(DEVICE)
+    batch: int = 0                      # ONCET inference batch; 0 = auto (ONCET_BATCH)
 
 
 def preprocess(x: np.ndarray, fs: float, line_freq: float | None) -> np.ndarray:
@@ -89,35 +123,64 @@ def preprocess(x: np.ndarray, fs: float, line_freq: float | None) -> np.ndarray:
 
 
 def build_model(p: Params, n_channels: int):
+    """
+    The DynaSD detector on p.device. LiNDDA's and NDD's batch sizes are training hyperparameters
+    (they change the fitted forecaster), so they are the same on every device; only ONCET's
+    inference batch follows BATCH / the device.
+    """
     import torch
 
     torch.manual_seed(p.seed)
     np.random.seed(p.seed)
+    cuda = p.device == "cuda"
     if p.model == "lindda":
         from dynasd import LiNDDA
 
         return LiNDDA(fs=TARGET_FS, sequence_length=3, forecast_length=2, w_size=1, w_stride=0.5,
-                      num_epochs=p.num_epochs, batch_size=1024, lr=0.01, verbose=False)
+                      num_epochs=p.num_epochs, batch_size=1024, lr=0.01, verbose=False, use_cuda=cuda)
     if p.model == "ndd":
         from dynasd import NDD
 
         return NDD(fs=TARGET_FS, hidden_size=10, sequence_length=12, forecast_length=1, w_size=1, w_stride=0.5,
-                   num_epochs=p.num_epochs, batch_size=8192, lr=0.01, verbose=False)
+                   num_epochs=p.num_epochs, batch_size=8192, lr=0.01, verbose=False, use_cuda=cuda)
     if p.model == "absslp":
         from dynasd import ABSSLP
 
         return ABSSLP(fs=TARGET_FS, w_size=1, w_stride=0.5)
     if p.model == "oncet":
-        from dynasd import ONCET
-
         kw = {}
         if p.checkpoint_dir:
             kw = {"checkpoint_path": f"{p.checkpoint_dir}/ONCET/best_model.pth",
                   "config_path": f"{p.checkpoint_dir}/ONCET/final_training_config.json"}
-        model = ONCET(fs=TARGET_FS, w_size=1, w_stride=0.5, device="cpu", verbose=False, batch_size=128, **kw)
-        undilate(model.model)
+        model = oncet_class()(fs=TARGET_FS, w_size=1, w_stride=0.5, device=p.device, verbose=False,
+                              batch_size=oncet_batch(p), **kw)
+        if not cuda:
+            # CPU only: cuDNN has fast dilated depthwise kernels, PyTorch's CPU backend has not.
+            undilate(model.model)
         return model
     raise ValueError(f"unknown MODEL {p.model!r}; one of {', '.join(MODELS)}")
+
+
+def oncet_class():
+    """
+    DynaSD's ONCET with its windowed input kept in host memory. Upstream moves the whole
+    recording's windows to the device and then hands that tensor to a DataLoader with
+    pin_memory=True, which fails on a CUDA tensor ("only dense CPU tensors can be pinned") and
+    would hold every window in GPU memory. Here the windows stay on the CPU (pinned when there is
+    a GPU) and each batch is copied to the device in forward(), as ONCET.forward already does.
+    On the CPU nothing changes: upstream's .to("cpu") was a no-op.
+    """
+    from dynasd import ONCET
+
+    class HostWindowsONCET(ONCET):
+        def _prepare_oncet_segment(self, data):
+            device, self.device = self.device, "cpu"
+            try:
+                return super()._prepare_oncet_segment(data)
+            finally:
+                self.device = device
+
+    return HostWindowsONCET
 
 
 def undilate(net) -> None:
@@ -134,7 +197,7 @@ def undilate(net) -> None:
         if isinstance(mod, nn.Conv1d) and mod.dilation[0] > 1:
             d, k = mod.dilation[0], mod.kernel_size[0]
             w = mod.weight.data
-            wide = torch.zeros(w.shape[0], w.shape[1], (k - 1) * d + 1, dtype=w.dtype)
+            wide = torch.zeros(w.shape[0], w.shape[1], (k - 1) * d + 1, dtype=w.dtype, device=w.device)
             wide[:, :, ::d] = w
             mod.weight = nn.Parameter(wide, requires_grad=False)
             mod.kernel_size = (wide.shape[-1],)
@@ -182,7 +245,10 @@ def run(x256: np.ndarray, names: list[str], t0: float, baseline: tuple[float, fl
     model.fit(X.iloc[b0:b1].reset_index(drop=True))
     timings["fit_s"] = round(time.monotonic() - t, 2)
     t = time.monotonic()
-    scores = model(X).astype(float)                     # index: window start (s) from t0w
+    import torch
+
+    with torch.no_grad():                               # inference only (ONCET builds no autograd graph)
+        scores = model(X).astype(float)                 # index: window start (s) from t0w
     del X
     scores.index = scores.index.to_numpy() + t0w
     scores = scores.ffill().bfill().fillna(0.0)

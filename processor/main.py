@@ -91,10 +91,32 @@ def env_params() -> D.Params:
         onset_window_s=_num("ONSET_WINDOW_S", 1.0, lo=0.0), score_window_s=_num("SCORE_WINDOW_S", 5.0, lo=0.5),
         search_before_s=_num("SEARCH_BEFORE_S", 30.0, lo=-1.0), baseline_s=_num("BASELINE_S", 60.0, lo=5.0),
         seed=_num("SEED", 42, int), checkpoint_dir=os.environ.get("DYNASD_CHECKPOINTS") or None,
+        batch=_num("BATCH", 0, int, lo=0),
     )
     if p.rwin_req > p.rwin_size:
         raise ValueError("RWIN_REQ must be <= RWIN_SIZE")
+    device = (os.environ.get("DEVICE") or "auto").strip().lower()
+    if device not in D.DEVICES:
+        raise ValueError(f"DEVICE={device!r}: one of {', '.join(D.DEVICES)}")
     return p
+
+
+def choose_device(p: D.Params) -> dict:
+    """Pick the device for DEVICE (auto|cuda|cpu), set p.device, log it; the provenance record."""
+    requested, p.device, why = D.choose_device(os.environ.get("DEVICE") or "auto")
+    (log.warning if requested == "cuda" and p.device == "cpu" else log.info)("%s", why)
+    rec = {"requested": requested, "used": p.device, "reason": why}
+    if p.device == "cuda":
+        import torch
+
+        # ONCET runs fixed-size batches: let cuDNN pick its fastest convolution algorithms.
+        torch.backends.cudnn.benchmark = True
+        rec.update({"gpu": torch.cuda.get_device_name(0), "cuda": torch.version.cuda,
+                    "cudnn": torch.backends.cudnn.version()})
+    if p.model == "oncet":
+        rec["oncet_batch"] = D.oncet_batch(p)
+        log.info("ONCET batch: %d (%s)", rec["oncet_batch"], f"BATCH={p.batch}" if p.batch else f"auto for {p.device}")
+    return rec
 
 
 def process_recording(rec: I.Recording, p: D.Params) -> dict:
@@ -157,10 +179,11 @@ def main() -> int:
     n_cpu, cpu_src = R.available_cpus()
     torch.set_num_threads(n_cpu)
     log.info("PyTorch threads: %d (%s)", n_cpu, cpu_src)
+    device = choose_device(p)
     output_dir.mkdir(parents=True, exist_ok=True)
     recs = I.find_recordings(input_dir) if input_dir.exists() else []
-    log.info("%s %s: %d recording(s) under %s; MODEL=%s THRESHOLD=%s", APP_NAME, version_of(REPO_ROOT), len(recs),
-             input_dir, p.model, p.threshold)
+    log.info("%s %s: %d recording(s) under %s; MODEL=%s THRESHOLD=%s on %s", APP_NAME, version_of(REPO_ROOT),
+             len(recs), input_dir, p.model, p.threshold, p.device)
     method = D.METHOD_NAME[p.model]
     statuses = {}
     onset_rows, chan_rows = [], []
@@ -202,7 +225,10 @@ def main() -> int:
     ok = sum(1 for s in statuses.values() if s["status"] == "ok")
     prov = {
         "app": APP_NAME, "version": version_of(REPO_ROOT), "tools": tool_versions(),
-        "parameters": {k: v for k, v in vars(p).items() if k != "checkpoint_dir"},
+        "parameters": {**{k: v for k, v in vars(p).items() if k not in ("checkpoint_dir", "device")},
+                       "DEVICE": device["requested"]},
+        # the device actually used, why, and on cuda the GPU and CUDA/cuDNN versions
+        "device": device,
         "inputs": [r.rel for r in recs],
         "started": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "seconds": round(time.monotonic() - t_run, 2), "recordings": statuses,

@@ -35,7 +35,7 @@ trigger, and a per-channel score.
 
 | Name | Default | What it does |
 |---|---|---|
-| `MODEL` | `lindda` | `lindda`: LiNDDA, linear forecaster of the baseline dynamics. `ndd`: NDD, the same with an LSTM forecaster. `absslp`: baseline-normalised mean absolute slope (Schindler et al. 2007), no training. `oncet`: DynaSD's pretrained convolutional seizure classifier (checkpoint bundled; minutes per recording on CPU). |
+| `MODEL` | `lindda` | `lindda`: LiNDDA, linear forecaster of the baseline dynamics. `ndd`: NDD, the same with an LSTM forecaster. `absslp`: baseline-normalised mean absolute slope (Schindler et al. 2007), no training. `oncet`: DynaSD's pretrained convolutional seizure classifier (checkpoint bundled; ~5 min per recording on CPU: run it on the gpu runtime, see *GPU*). |
 | `THRESHOLD` | `mean` | `mean` or `median`: the two pretrained thresholds DynaSD ships per model (phi-optimal, mean over patients; F1-optimal, median over patients). `mean` is stricter and did better on the demo (below). A number sets the threshold on the model's score. |
 | `MIN_CHANNELS` | `3` | The recording-level onset is the onset of the k-th earliest channel. `1` takes the first channel, which a single artefactual channel can set. |
 | `SEARCH_BEFORE_S` | `30` | When the input gives a seizure onset (`recordings.csv onset_s`, or a `seizure`/`ictal` event), onsets are searched from this long before it; negative: ignore the given onset and search everything after the baseline. |
@@ -45,6 +45,8 @@ trigger, and a per-channel score.
 | `FILTER_W` | `10` | DynaSD `filter_w`: moving average (s) over the window scores before thresholding. |
 | `RWIN_SIZE`, `RWIN_REQ` | `5`, `4` | DynaSD `rwin_size`/`rwin_req`: a window is seizing when `RWIN_REQ` of the next `RWIN_SIZE` seconds are above threshold. |
 | `SEED` | `42` | Seed of the forecasters' initial weights and training order. |
+| `DEVICE` | `auto` | `auto`, `cuda` or `cpu`: where PyTorch runs. `auto` takes `cuda` when `torch.cuda.is_available()` (the gpu runtime) and `cpu` otherwise; `cuda` on a host without a GPU falls back to `cpu` with a WARNING rather than failing; `cpu` stays on the CPU even with a GPU. Logged at start and recorded in `provenance.json` as `device` (`requested`, `used`, `reason`, and on cuda the GPU name and CUDA/cuDNN versions). See *GPU*. |
+| `BATCH` | `0` | ONCET's inference batch (windows × channels per forward pass). `0` = automatic: 8192 on cuda (sized for a 16 GB T4: under 1 GB of activations), 128 on cpu (v0.1.0's). Only float rounding depends on it. LiNDDA's (1024) and NDD's (8192) batch sizes are training hyperparameters that shape the fitted model, so they are fixed on every device. |
 
 ## What it does, step by step
 
@@ -177,7 +179,7 @@ in the onset window. Our onset is early rather than late on average because the 
 
 ## Runtime
 
-`computeTypes: [standard]`, 4 vCPU / 8 GiB, 4 h timeout. One recording at a time; signals
+`computeTypes: [standard, gpu]` (see *GPU*), 4 vCPU / 8 GiB, 4 h timeout. One recording at a time; signals
 are read a block of 16 channels at a time and kept at 256 Hz (float32), so memory is ~2 GB per
 hour of 128-channel data plus the model's working copies.
 
@@ -195,16 +197,76 @@ Natively (arm64, same Mac) all 24 demo clips take ~2 min with LiNDDA (5–10 s e
 ONCET takes 1.5–7 min per clip natively, even after rewriting its dilated convolutions as
 undilated ones (identical output, ~5× faster: PyTorch's CPU backend has no fast kernel for
 dilated depthwise convolutions). 8 GiB leaves room for hour-long recordings with LiNDDA; for
-ONCET on many long recordings raise the timeout. The image is 432 MB compressed (~1.1 GB
-unpacked; PyTorch CPU is 750 MB of it).
+ONCET on many long recordings use the gpu runtime or raise the timeout. The image is
+3.8 GB compressed with CUDA PyTorch (0.43 GB for the CPU-only build; see *GPU*).
+
+## GPU
+
+One image serves both runtimes (`computeTypes: [standard, gpu]`): it is built on the CUDA 12.6
+build of PyTorch, which also runs on a machine without a GPU. `DEVICE=auto` (the default) puts
+the models on the GPU when the step has one and on the CPU otherwise, as in processor-lst-ai.
+
+- **standard**: a CPU Fargate task, exactly as v0.1.0. LiNDDA, the default, takes 5–40 s per
+  clip; there is no reason to use a GPU for it (or NDD, ABSSLP).
+- **gpu**: the compute node's GPU tier, EC2 g4dn.xlarge (NVIDIA T4 16 GB, 4 vCPU, ~15 GB of
+  memory for tasks; this app asks 4 vCPU / 8 GiB). Use it for `MODEL=oncet`, DynaSD's
+  pretrained convolutional classifier, which takes ~5 min per 116-channel clip on 4 CPUs
+  (1–2.5 h for the 24 demo clips). ONCET is ~90,000–110,000 independent 1 s single-channel windows per
+  clip through a small 1-D CNN: an ideal GPU workload. **Estimated speed-up 20–50× for ONCET**
+  (seconds per clip; the run is then dominated by reading and filtering the EDF, ~5–10 s per
+  clip). This is an estimate until measured on dev.
+- **Cost.** g4dn.xlarge is ~$0.53/h on demand, roughly 3× a 4 vCPU / 8 GiB Fargate task
+  (~$0.20/h), so ONCET on the GPU costs a fraction of ONCET on CPU for anything above a few
+  clips; LiNDDA on the GPU only costs more. Expect a cold EC2 instance and a ~2 min image pull
+  on the first GPU step (EC2 has no lazy image loading; the CUDA image is large).
+- **Image size.** CUDA PyTorch and NVIDIA's libraries make the image 3.8 GB compressed
+  (~7 GB unpacked) against 0.43 GB (~1.5 GB) for the CPU-only build, and every
+  run pulls it, CPU runs included. That is the price of one app for both runtimes: the App
+  Store builds one image per repository from its `Dockerfile` (app-deploy-service runs kaniko
+  on the repository at the tag, no Dockerfile or build-argument choice), so a separate CPU and
+  GPU image would mean a second repository/app. `make image-cpu` (`TORCH_FLAVOUR=cpu`) still
+  builds the small CPU-only image for local use.
+
+**What changes on the GPU.** The same models with the same weights and seeds; only the
+arithmetic differs. The forecasters (LiNDDA, NDD) are initialised and their training batches
+shuffled on the CPU (same `SEED`), then trained in float32 on the GPU; ONCET keeps its dilated
+convolutions (cuDNN has fast kernels for them; on CPU they are rewritten as equivalent
+undilated ones, see *Runtime*) with `cudnn.benchmark` on. float32 on a GPU differs from the CPU
+in the last bits (different summation order, cuDNN algorithms): expect scores to agree to about
+1e-5 relative (ONCET probabilities to ~1e-6 absolute), so `score` in `channel_onsets.csv` (4
+decimals) can move in its last digit and an onset can move by one 0.5 s window when a smoothed
+score sits within that rounding of the threshold, which is rare. For LiNDDA/NDD the ten training
+epochs can amplify the rounding slightly more. GPU results are not bit-reproducible from run to
+run (cuDNN autotuning); CPU results are, and are byte-identical to v0.1.0
+(`tests/test_processor.py::test_cpu_results_match_v0_1_0`, against `tests/golden/`).
+
+**Implementation notes.** DynaSD's ONCET moves a whole recording's windows to the device and
+then gives that tensor to a `DataLoader(pin_memory=True)`, which cannot pin a CUDA tensor; the
+app keeps the windows in host memory and copies one batch at a time (`detect.oncet_class`).
+Scoring runs under `torch.no_grad()`. The cuda path is unit-tested by mocking
+`torch.cuda.is_available` (there is no GPU on the build machine). Checked on the Mac (Docker,
+amd64 emulation, `--cpus 4 --memory 4g`, no GPU): the CUDA image starts, logs
+`DEVICE=auto: cuda not available, using cpu` (and a WARNING for `DEVICE=cuda`), and its outputs
+are byte-identical to v0.1.0's image for LiNDDA on two demo clips and for ONCET on one (85
+channels, 256 s: ~105 s of ONCET scoring either way, peak 1.4 GB). On CPU the CUDA build of
+PyTorch is as fast as the CPU build (LiNDDA and ONCET timings within run-to-run noise); the cost
+for CPU runs is the pull, not the run.
+
+To measure on dev: run the workflow (or a one-step workflow) with dynasd `MODEL=oncet` and the
+step's `executionTarget` `gpu`, then compare `timings.forward_s` per recording in
+`dynasd/provenance.json` (and `device.used` = `cuda`) with a `standard` run of the same input.
 
 ## Running it locally
 
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 make test PYTHON=.venv/bin/python        # unit tests on a synthetic fixture
+# ONCET's tests need its checkpoint in data/checkpoints/ONCET (else skipped), e.g. from the image:
+#   docker cp $(docker create processor-seizure-dynasd:dev):/opt/dynasd/ONCET data/checkpoints/
 make run PYTHON=.venv/bin/python         # Docker over the fixture -> data/output/
 make run-demo DEMO=../workflow-epilepsy-ieeg/data/work/prep/ieeg     # or .../data/seizures/DATA
+make run-demo IMAGE=processor-seizure-dynasd:dev TORCH_FLAVOUR=cpu      # the small CPU-only image
+make run-demo DOCKER_GPU='--gpus all'                                 # on a host with an NVIDIA GPU
 make validate TRUTH=../workflow-epilepsy-ieeg/data/seizures/DATA
 ```
 
@@ -231,7 +293,8 @@ make validate TRUTH=../workflow-epilepsy-ieeg/data/seizures/DATA
 
 Apache-2.0 for this app's code (`LICENSE`). The image bundles DynaSD (MIT; the author, Will
 Ojemann, confirmed use of the code and the released checkpoints) at a pinned commit, its ONCET
-checkpoint (pinned URL + SHA-256), PyTorch (CPU-only build, BSD-3-Clause), MNE-Python, NumPy,
+checkpoint (pinned URL + SHA-256), PyTorch (CUDA 12.6 build, BSD-3-Clause) with NVIDIA's CUDA
+libraries (NVIDIA EULA, redistributable), MNE-Python, NumPy,
 SciPy, scikit-learn and pandas (BSD); see `THIRD_PARTY.md`.
 
 ## Citations
