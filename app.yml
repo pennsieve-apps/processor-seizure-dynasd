@@ -1,0 +1,130 @@
+# yaml-language-server: $schema=https://schemas.pennsieve.io/app-manifest/v1.json
+schemaVersion: "1.0"
+application:
+  name: Seizure Onset (DynaSD)
+  description: >-
+    Finds when a seizure starts and which channels start it, from intracranial EEG (SEEG or
+    ECoG). Wraps DynaSD (Ojemann et al. 2026): a model of each recording's own pre-ictal
+    dynamics (by default LiNDDA, a linear vector autoregressive forecaster) is fitted on the
+    baseline, and the seizure is where the signals stop following it. Writes the recording-level
+    onset and, per channel, its onset time, whether it is recruited at onset, and a score.
+  type: processor
+  tags:
+    - ieeg
+    - seeg
+    - electrophysiology
+    - epilepsy
+    - neuroscience
+    - seizure-detection
+    - seizure-onset
+    - machine-learning
+runtime:
+  # One recording at a time, PyTorch on CPU. On the demo (SEEG clips, 106-208 bipolar channels,
+  # 1024 Hz, 5.6-7.7 min) LiNDDA takes 17-39 s per clip and peaks at 1.6 GB, NDD 29 s / 2.2 GB,
+  # ONCET ~5 min / 1.8 GB (amd64 emulation on an M-series Mac; see README "Runtime").
+  cpu: 4096
+  memory: 8192
+  computeTypes:
+    - standard
+  timeoutSeconds: 14400
+parameters:
+  - name: MODEL
+    type: string
+    label: Detector
+    description: >-
+      lindda (default): linear forecaster of the baseline dynamics, the preprint's best
+      intracranial model; ndd: the same with an LSTM forecaster; absslp: baseline-normalised
+      absolute slope (Schindler et al. 2007), no training; oncet: DynaSD's pretrained
+      convolutional seizure classifier (bundled checkpoint; slow on CPU, minutes per recording).
+    defaultValue: lindda
+    validValues: [lindda, ndd, absslp, oncet]
+  - name: THRESHOLD
+    type: string
+    label: Threshold
+    description: >-
+      mean or median: the two thresholds DynaSD calibrated on its annotated cohort (phi-optimal
+      mean, F1-optimal median of per-patient thresholds); mean is stricter and did better on the
+      demo. A number sets the threshold on the detector's score directly.
+    defaultValue: mean
+  - name: MIN_CHANNELS
+    type: integer
+    label: Channels needed for onset
+    description: >-
+      The recording-level onset is when this many channels have started seizing (the k-th
+      earliest channel onset). 1 takes the first channel, which an isolated artefact can trigger.
+    defaultValue: 3
+    min: 1
+  - name: SEARCH_BEFORE_S
+    type: number
+    label: Search before the known onset (s)
+    description: >-
+      When the input gives a seizure onset (recordings.csv onset_s or a seizure event), onsets are
+      searched from this many seconds before it to the end of the recording; a negative value
+      ignores the given onset and searches everything after the baseline.
+    defaultValue: 30
+    min: -1
+  - name: ONSET_WINDOW_S
+    type: number
+    label: Recruited-at-onset window (s)
+    description: A channel is recruited when its onset is at most this long after the recording-level onset.
+    defaultValue: 1
+    min: 0
+  - name: SCORE_WINDOW_S
+    type: number
+    label: Score window (s)
+    description: The per-channel score is the smoothed detector output over this long after the recording-level onset, divided by the threshold.
+    defaultValue: 5
+    min: 0.5
+  - name: BASELINE_S
+    type: number
+    label: Baseline length (s)
+    description: >-
+      Length of the baseline the detector is fitted on when the input does not give one: the
+      stretch ending 60 s before the given onset, else the start of the recording.
+    defaultValue: 60
+    min: 5
+  - name: FILTER_W
+    type: number
+    label: Smoothing (s)
+    description: DynaSD filter_w, the moving-average window applied to the scores before thresholding.
+    defaultValue: 10
+    min: 1
+  - name: RWIN_SIZE
+    type: number
+    label: Sustained-activity span (s)
+    description: DynaSD rwin_size; a window seizes when RWIN_REQ of the next RWIN_SIZE seconds are above threshold.
+    defaultValue: 5
+    min: 1
+  - name: RWIN_REQ
+    type: number
+    label: Sustained-activity requirement (s)
+    description: DynaSD rwin_req (at most RWIN_SIZE).
+    defaultValue: 4
+    min: 1
+  - name: SEED
+    type: integer
+    label: Random seed
+    description: Seed for the forecaster's initial weights and training order (LiNDDA, NDD).
+    defaultValue: 42
+inputs:
+  - name: ieeg
+    description: >-
+      The BIDS-iEEG derivative of ieeg-prep (recordings.csv, EDF + _channels.tsv + _events.tsv),
+      or any BIDS-iEEG dataset or EDF / BrainVision / FIF files. Referential recordings are
+      re-referenced to neighbouring contacts (bipolar). Needs a pre-ictal baseline (given, or the
+      start of the recording).
+    mediaTypes:
+      - application/x-edf
+      - text/csv
+      - text/tab-separated-values
+      - application/json
+    placement: root
+    required: true
+outputs:
+  - name: onsets
+    description: >-
+      seizure_onsets.csv (recording_id, onset_s, method), channel_onsets.csv (recording_id,
+      channel, onset_s, recruited, score, method) and provenance.json.
+    mediaTypes:
+      - text/csv
+      - application/json

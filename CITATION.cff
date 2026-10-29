@@ -1,0 +1,197 @@
+cff-version: "1.2.0"
+message: If you use this app, please cite it and the works it builds on, listed under references.
+type: software
+title: Seizure Onset (DynaSD)
+abstract: Seizure onset time and per-channel onset, recruitment and score from intracranial EEG, with DynaSD
+  (neural dynamic divergence; by default LiNDDA, a linear forecaster of each recording's pre-ictal dynamics).
+  A step of the Seizure Onset Localisation workflow.
+authors:
+- name: Pennsieve (University of Pennsylvania)
+repository-code: https://github.com/pennsieve-apps/processor-seizure-dynasd
+license: Apache-2.0
+keywords:
+- ieeg
+- seeg
+- electrophysiology
+- epilepsy
+- neuroscience
+- seizure-detection
+- seizure-onset
+references:
+- type: article
+  title: Unsupervised seizure annotation and detection with neural dynamic divergence
+  authors:
+  - family-names: Ojemann
+    given-names: William K.S.
+  - family-names: Xu
+    given-names: Zhongchuan
+  - family-names: Shi
+    given-names: Haoer
+  - family-names: Walsh
+    given-names: Katie
+  - family-names: Pattnaik
+    given-names: Akash
+  - family-names: Sinha
+    given-names: Nishant
+  - family-names: Lavelle
+    given-names: Sarah
+  - family-names: Aguila
+    given-names: Carlos
+  - family-names: Gallagher
+    given-names: Ryan
+  - family-names: Revell
+    given-names: Andrew
+  - family-names: LaRocque
+    given-names: Joshua J.
+  - family-names: Korzun
+    given-names: Jacob
+  - family-names: Kulick-Soper
+    given-names: Catherine V.
+  - family-names: Zhou
+    given-names: Daniel J.
+  - family-names: Galer
+    given-names: Peter D.
+  - family-names: Sinha
+    given-names: Saurabh R.
+  - family-names: Shinohara
+    given-names: Russell T.
+  - family-names: Davis
+    given-names: Kathryn A.
+  - family-names: Litt
+    given-names: Brian
+  - family-names: Conrad
+    given-names: Erin C.
+  year: 2026
+  journal: medRxiv
+  notes: Preprint, posted 2026-02-17.
+  doi: 10.64898/2026.02.15.26346325
+- type: software
+  title: DynaSD
+  authors:
+  - family-names: Ojemann
+    given-names: William
+  - family-names: Walsh
+    given-names: Katherine
+  - family-names: Shi
+    given-names: Haoer
+  repository-code: https://github.com/wojemann/DynaSD
+  license: MIT
+  commit: 48b2b959605a37fb03a4d99ae6fcc1459c04cc37
+  version: 0.1.0
+- type: article
+  title: Assessing seizure dynamics by analysing the correlation structure of multichannel intracranial EEG
+  authors:
+  - family-names: Schindler
+    given-names: K.
+  - family-names: Leung
+    given-names: H.
+  - family-names: Elger
+    given-names: C. E.
+  - family-names: Lehnertz
+    given-names: K.
+  year: 2007
+  journal: Brain
+  volume: 130
+  issue: '1'
+  start: '65'
+  end: '77'
+  doi: 10.1093/brain/awl304
+- type: article
+  title: MEG and EEG data analysis with MNE-Python
+  authors:
+  - family-names: Gramfort
+    given-names: Alexandre
+  - family-names: Luessi
+    given-names: Martin
+  - family-names: Larson
+    given-names: Eric
+  - family-names: Engemann
+    given-names: Denis A.
+  - family-names: Strohmeier
+    given-names: Daniel
+  - family-names: Brodbeck
+    given-names: Christian
+  - family-names: Goj
+    given-names: Roman
+  - family-names: Jas
+    given-names: Mainak
+  - family-names: Brooks
+    given-names: Teon
+  - family-names: Parkkonen
+    given-names: Lauri
+  - family-names: Hämäläinen
+    given-names: Matti
+  year: 2013
+  journal: Frontiers in Neuroscience
+  volume: 7
+  start: '267'
+  doi: 10.3389/fnins.2013.00267
+- type: generic
+  title: 'PyTorch: An Imperative Style, High-Performance Deep Learning Library'
+  authors:
+  - family-names: Paszke
+    given-names: Adam
+  - family-names: Gross
+    given-names: Sam
+  - family-names: Massa
+    given-names: Francisco
+  - family-names: Lerer
+    given-names: Adam
+  - family-names: Bradbury
+    given-names: James
+  - family-names: Chanan
+    given-names: Gregory
+  - family-names: Killeen
+    given-names: Trevor
+  - family-names: Lin
+    given-names: Zeming
+  - family-names: Gimelshein
+    given-names: Natalia
+  - family-names: Antiga
+    given-names: Luca
+  - family-names: Desmaison
+    given-names: Alban
+  - family-names: Köpf
+    given-names: Andreas
+  - family-names: Yang
+    given-names: Edward
+  - family-names: DeVito
+    given-names: Zach
+  - family-names: Raison
+    given-names: Martin
+  - family-names: Tejani
+    given-names: Alykhan
+  - family-names: Chilamkurthy
+    given-names: Sasank
+  - family-names: Steiner
+    given-names: Benoit
+  - family-names: Fang
+    given-names: Lu
+  - family-names: Bai
+    given-names: Junjie
+  - family-names: Chintala
+    given-names: Soumith
+  year: 2019
+  publisher:
+    name: arXiv
+  doi: 10.48550/arXiv.1912.01703
+- type: data
+  title: Multi-Expert Seizure Annotation
+  authors:
+  - family-names: Ojemann
+    given-names: William K
+  - family-names: Zhou
+    given-names: Daniel
+  - family-names: Armstrong
+    given-names: Caren
+  - family-names: Sinha
+    given-names: Nishant
+  - family-names: Litt
+    given-names: Brian
+  - family-names: Conrad
+    given-names: Erin
+  year: 2026
+  publisher:
+    name: Pennsieve Discover
+  doi: 10.26275/dely-fzwx
+  license: CC-BY-4.0

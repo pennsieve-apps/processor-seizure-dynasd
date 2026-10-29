@@ -1,0 +1,10 @@
+# Local development and tests (macOS/Linux, any CPU). PyTorch from PyPI is fine here.
+torch==2.11.0
+mne==1.13.2
+numpy==2.4.6
+scipy==1.18.1
+pandas==3.1.0
+scikit-learn==1.9.1
+tqdm==4.70.1
+dynasd @ https://github.com/wojemann/DynaSD/archive/48b2b959605a37fb03a4d99ae6fcc1459c04cc37.tar.gz
+pytest==9.2.0
