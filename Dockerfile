@@ -42,6 +42,9 @@ for rel, (name, sha) in files.items():
     open(dst, "wb").write(data)
     print("checkpoint", rel, len(data), "bytes, sha256 ok")
 PY
+# Readable (and writable, for any cache entry DynaSD adds) by whichever uid the platform runs us
+# as: the dev run failed with "Permission denied: '/opt/dynasd'" although local runs passed.
+RUN chmod -R a+rwX "${DYNASD_CACHE_DIR}"
 
 COPY processor/ /processor/processor/
 COPY VERSION /processor/VERSION
