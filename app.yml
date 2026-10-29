@@ -114,7 +114,7 @@ inputs:
       re-referenced to neighbouring contacts (bipolar). Needs a pre-ictal baseline (given, or the
       start of the recording).
     mediaTypes:
-      - application/x-edf
+      - application/edf
       - text/csv
       - text/tab-separated-values
       - application/json
@@ -123,8 +123,10 @@ inputs:
 outputs:
   - name: onsets
     description: >-
-      seizure_onsets.csv (recording_id, onset_s, method), channel_onsets.csv (recording_id,
-      channel, onset_s, recruited, score, method) and provenance.json.
+      dynasd/seizure_onsets.csv (recording_id, onset_s, method), dynasd/channel_onsets.csv
+      (recording_id, channel, onset_s, recruited, score, method) and dynasd/provenance.json: one
+      folder named after the method, so the output can be one of several links into a fan-in
+      port (seizure-consensus methods).
     mediaTypes:
       - text/csv
       - application/json

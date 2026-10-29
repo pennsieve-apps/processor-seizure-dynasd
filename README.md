@@ -29,7 +29,7 @@ trigger, and a per-channel score.
 | Port | Direction | Placement | What |
 |---|---|---|---|
 | `ieeg` | input | root | The ieeg-prep derivative (`recordings.csv`, EDF + `_channels.tsv` + `_events.tsv` + `_ieeg.json`), or any BIDS-iEEG dataset or EDF / BrainVision / FIF files, found by name anywhere under `INPUT_DIR` (symlinks followed). |
-| `onsets` | output | `OUTPUT_DIR` | `seizure_onsets.csv`, `channel_onsets.csv`, `provenance.json`. |
+| `onsets` | output | `OUTPUT_DIR/dynasd/` | `seizure_onsets.csv`, `channel_onsets.csv`, `provenance.json`, under a folder named after the method so the output can be one of several links into a fan-in port (seizure-consensus `methods`) without name collisions. |
 
 ## Parameters
 

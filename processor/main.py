@@ -3,9 +3,12 @@ processor-seizure-dynasd: seizure onset time and per-channel onset/spread with D
 
 Reads the ieeg-prep derivative (or any BIDS-iEEG / EDF input) under INPUT_DIR and writes
 
-  OUTPUT_DIR/seizure_onsets.csv   recording_id, onset_s, method
-  OUTPUT_DIR/channel_onsets.csv   recording_id, channel, onset_s, recruited, score, method
-  OUTPUT_DIR/provenance.json
+  OUTPUT_DIR/dynasd/seizure_onsets.csv   recording_id, onset_s, method
+  OUTPUT_DIR/dynasd/channel_onsets.csv   recording_id, channel, onset_s, recruited, score, method
+  OUTPUT_DIR/dynasd/provenance.json
+
+Everything sits in a folder named after the method, so this output can be one of several links
+into one fan-in port (seizure-consensus `methods`) without its file names colliding.
 
 One recording at a time; signals are read a block of channels at a time and kept at 256 Hz.
 """
@@ -26,6 +29,7 @@ from pathlib import Path
 import numpy as np
 
 from processor import detect as D
+from processor import resources as R
 from processor import ieeg as I
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -34,6 +38,7 @@ for noisy in ("mne", "matplotlib", "urllib3"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 
 APP_NAME = "processor-seizure-dynasd"
+OUTPUT_FOLDER = "dynasd"  # OUTPUT_DIR/<folder>/: the output can be one link of a fan-in port
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DYNASD_COMMIT = "48b2b959605a37fb03a4d99ae6fcc1459c04cc37"
 
@@ -139,7 +144,7 @@ def fmt(v, nd=3):
 def main() -> int:
     t_run = time.monotonic()
     input_dir = Path(os.environ.get("INPUT_DIR") or "/data/input")
-    output_dir = Path(os.environ.get("OUTPUT_DIR") or "/data/output")
+    output_dir = Path(os.environ.get("OUTPUT_DIR") or "/data/output") / OUTPUT_FOLDER
     try:
         p = env_params()
     except ValueError as exc:
@@ -147,7 +152,11 @@ def main() -> int:
         return 2
     import torch
 
-    torch.set_num_threads(max(1, os.cpu_count() or 1))
+    # PyTorch threads share the process's memory: one per CPU the container is given (the cgroup
+    # quota; os.cpu_count() is the host's), no memory cap.
+    n_cpu, cpu_src = R.available_cpus()
+    torch.set_num_threads(n_cpu)
+    log.info("PyTorch threads: %d (%s)", n_cpu, cpu_src)
     output_dir.mkdir(parents=True, exist_ok=True)
     recs = I.find_recordings(input_dir) if input_dir.exists() else []
     log.info("%s %s: %d recording(s) under %s; MODEL=%s THRESHOLD=%s", APP_NAME, version_of(REPO_ROOT), len(recs),

@@ -133,13 +133,15 @@ def test_rising_onsets_ignores_runs_already_on():
 def test_main_on_derivative(fixture_dir, tmp_path, monkeypatch):
     out = tmp_path / "out"
     assert run(monkeypatch, fixture_dir / "linked", out) == 0
-    onsets = read_csv(out / "seizure_onsets.csv")
+    # everything under a folder named after the method (one link of a fan-in port)
+    assert [q.name for q in out.iterdir()] == ["dynasd"]
+    onsets = read_csv(out / "dynasd" / "seizure_onsets.csv")
     assert [r["recording_id"] for r in onsets] == ["sub-01_task-ictal_run-01", "sub-01_task-ictal_run-02"]
     for r in onsets:
         assert r["method"] == "dynasd-lindda"
         # 3rd channel to start (MIN_CHANNELS=3) is A03-A04, recruited 8 s after the onset at 90 s
         assert make_fixture.ONSET - 5 <= float(r["onset_s"]) <= make_fixture.ONSET + 12
-    rows = read_csv(out / "channel_onsets.csv")
+    rows = read_csv(out / "dynasd" / "channel_onsets.csv")
     assert set(rows[0]) == {"recording_id", "channel", "onset_s", "recruited", "score", "method"}
     for r in rows:
         if r["channel"].startswith("B"):
@@ -147,7 +149,7 @@ def test_main_on_derivative(fixture_dir, tmp_path, monkeypatch):
         if r["channel"] in ("A01-A02", "A02-A03"):
             assert r["recruited"] == "true" and float(r["score"]) > 1
             assert make_fixture.ONSET - 5 <= float(r["onset_s"]) <= make_fixture.ONSET + 8
-    prov = json.loads((out / "provenance.json").read_text())
+    prov = json.loads((out / "dynasd" / "provenance.json").read_text())
     assert prov["app"] == "processor-seizure-dynasd" and prov["parameters"]["model"] == "lindda"
     st = prov["recordings"]["sub-01_task-ictal_run-01"]
     assert st["status"] == "ok" and st["baseline_source"] == "recording" and st["search_start_s"] == 60.0
@@ -156,11 +158,11 @@ def test_main_on_derivative(fixture_dir, tmp_path, monkeypatch):
 def test_main_plain_with_broken_file(fixture_dir, tmp_path, monkeypatch):
     out = tmp_path / "out"
     assert run(monkeypatch, fixture_dir / "plain", out, MODEL="absslp", MIN_CHANNELS="1") == 0
-    prov = json.loads((out / "provenance.json").read_text())
+    prov = json.loads((out / "dynasd" / "provenance.json").read_text())
     assert prov["recordings"]["sub-02_task-broken"]["status"] == "failed"
     assert prov["recordings"]["sub-02_task-ictal"]["status"] == "ok"
     assert prov["recordings"]["sub-02_task-ictal"]["baseline_source"] == "before onset_s"
-    rows = read_csv(out / "channel_onsets.csv")
+    rows = read_csv(out / "dynasd" / "channel_onsets.csv")
     assert {r["method"] for r in rows} == {"dynasd-absslp"}
 
 
@@ -169,8 +171,8 @@ def test_whole_input_root_and_reproducible(fixture_dir, tmp_path, monkeypatch):
     a, b = tmp_path / "a", tmp_path / "b"
     assert run(monkeypatch, fixture_dir, a) == 0
     assert run(monkeypatch, fixture_dir, b) == 0
-    assert len(read_csv(a / "seizure_onsets.csv")) == 3
-    assert (a / "channel_onsets.csv").read_text() == (b / "channel_onsets.csv").read_text()
+    assert len(read_csv(a / "dynasd" / "seizure_onsets.csv")) == 3
+    assert (a / "dynasd" / "channel_onsets.csv").read_text() == (b / "dynasd" / "channel_onsets.csv").read_text()
 
 
 def test_no_input_fails(tmp_path, monkeypatch):

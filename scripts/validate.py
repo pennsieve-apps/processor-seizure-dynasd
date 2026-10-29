@@ -98,6 +98,8 @@ def main(out_dir: Path, truth_dir: Path, annotations: Path | None = None) -> Non
     truth = truth_from_annotations(truth_dir) if (truth_dir / "annotations.tsv").exists() else truth_from_derivative(truth_dir)
     if annotations is not None:
         add_flags(truth, annotations)
+    if (out_dir / "dynasd" / "seizure_onsets.csv").exists():  # the app writes OUTPUT_DIR/dynasd/
+        out_dir = out_dir / "dynasd"
     onsets = {r["recording_id"]: (float(r["onset_s"]) if r["onset_s"] else None)
               for r in csv.DictReader(open(out_dir / "seizure_onsets.csv"))}
     chans: dict[str, list[dict]] = {}
