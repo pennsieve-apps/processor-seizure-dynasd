@@ -25,25 +25,9 @@ RUN pip install --no-cache-dir --no-deps \
 # in dynasd/_downloads.py. It sits where DynaSD's cache lookup finds it, so nothing is downloaded at
 # run time. (WVNT needs TensorFlow and is not bundled.)
 ENV DYNASD_CACHE_DIR=/opt/dynasd
-RUN python3 - <<'PY'
-import hashlib, os, urllib.request
-base = "https://github.com/wojemann/DynaSD/releases/download/v0.1.0-checkpoints"
-files = {
-    "ONCET/best_model.pth": ("best_model.pth", "34afd9c56ccd11d66f97bd224e3e0447ceae07ac9b3e503c30939d37f59a5c2f"),
-    "ONCET/final_training_config.json": ("final_training_config.json", "0481bbcc0e69c855112e5aa7d56737725f05662dd35162952d63983ca5e07dda"),
-}
-for rel, (name, sha) in files.items():
-    dst = os.path.join(os.environ["DYNASD_CACHE_DIR"], rel)
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    data = urllib.request.urlopen(f"{base}/{name}").read()
-    got = hashlib.sha256(data).hexdigest()
-    if got != sha:
-        raise SystemExit(f"{name}: sha256 {got} != {sha}")
-    open(dst, "wb").write(data)
-    print("checkpoint", rel, len(data), "bytes, sha256 ok")
-PY
-# Readable (and writable, for any cache entry DynaSD adds) by whichever uid the platform runs us
-# as: the dev run failed with "Permission denied: '/opt/dynasd'" although local runs passed.
+COPY docker/fetch_checkpoints.py /tmp/fetch_checkpoints.py
+RUN python3 /tmp/fetch_checkpoints.py && rm /tmp/fetch_checkpoints.py
+# Readable (and writable, for any cache entry DynaSD adds) by whichever uid the platform runs us as.
 RUN chmod -R a+rwX "${DYNASD_CACHE_DIR}"
 
 COPY processor/ /processor/processor/
