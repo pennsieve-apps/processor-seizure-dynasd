@@ -202,30 +202,31 @@ ONCET on many long recordings use the gpu runtime or raise the timeout. The imag
 
 ## GPU
 
-One image serves both runtimes (`computeTypes: [standard, gpu]`): it is built on the CUDA 12.6
-build of PyTorch, which also runs on a machine without a GPU. `DEVICE=auto` (the default) puts
-the models on the GPU when the step has one and on the CPU otherwise, as in processor-lst-ai.
+Two variants of the app, built from one release (app.yml `variants`; the Dockerfile's
+`TORCH_FLAVOUR` build argument picks the PyTorch build):
 
-- **standard**: a CPU Fargate task, exactly as v0.1.0. LiNDDA, the default, takes 5–40 s per
-  clip; there is no reason to use a GPU for it (or NDD, ABSSLP).
-- **gpu**: the compute node's GPU tier, EC2 g4dn.xlarge (NVIDIA T4 16 GB, 4 vCPU, ~15 GB of
-  memory for tasks; this app asks 4 vCPU / 8 GiB). Use it for `MODEL=oncet`, DynaSD's
-  pretrained convolutional classifier, which takes ~5 min per 116-channel clip on 4 CPUs
-  (1–2.5 h for the 24 demo clips). ONCET is ~90,000–110,000 independent 1 s single-channel windows per
-  clip through a small 1-D CNN: an ideal GPU workload. **Estimated speed-up 20–50× for ONCET**
-  (seconds per clip; the run is then dominated by reading and filtering the EDF, ~5–10 s per
-  clip). This is an estimate until measured on dev.
-- **Cost.** g4dn.xlarge is ~$0.53/h on demand, roughly 3× a 4 vCPU / 8 GiB Fargate task
-  (~$0.20/h), so ONCET on the GPU costs a fraction of ONCET on CPU for anything above a few
-  clips; LiNDDA on the GPU only costs more. Expect a cold EC2 instance and a ~2 min image pull
-  on the first GPU step (EC2 has no lazy image loading; the CUDA image is large).
-- **Image size.** CUDA PyTorch and NVIDIA's libraries make the image 3.8 GB compressed
-  (~7 GB unpacked) against 0.43 GB (~1.5 GB) for the CPU-only build, and every
-  run pulls it, CPU runs included. That is the price of one app for both runtimes: the App
-  Store builds one image per repository from its `Dockerfile` (app-deploy-service runs kaniko
-  on the repository at the tag, no Dockerfile or build-argument choice), so a separate CPU and
-  GPU image would mean a second repository/app. `make image-cpu` (`TORCH_FLAVOUR=cpu`) still
-  builds the small CPU-only image for local use.
+| Variant | Image | Runs on | Default `MODEL` |
+|---|---|---|---|
+| `cpu` (default) | CPU PyTorch, 0.43 GB compressed | a standard Fargate task (4 vCPU / 8 GiB) | `lindda` |
+| `gpu` | CUDA 12.6 PyTorch, 3.8 GB compressed | the GPU tier, EC2 g4dn.xlarge (NVIDIA T4 16 GB; 4 vCPU / 14 GiB) | `oncet` |
+
+A workflow step picks the variant; the parameters and ports are the same in both, so a step
+can switch without breaking its links. `DEVICE=auto` (the default) puts the models on the GPU
+when there is one and on the CPU otherwise, so the CUDA image also runs on CPU.
+
+- **cpu** is for LiNDDA (5–40 s per clip), NDD and the slope detector; none of them gain
+  from a GPU.
+- **gpu** is for `MODEL=oncet`, DynaSD's pretrained convolutional classifier: ~90,000–110,000
+  independent 1 s single-channel windows per clip through a small 1-D CNN. **Measured on dev:
+  59 s for the ONCET step on the GPU against 2163 s on CPU (~37×)** for the same clips; the
+  run is then dominated by reading and filtering the EDF.
+- **Cost.** g4dn.xlarge is ~$0.53/h on demand, roughly 3× a 4 vCPU / 8 GiB Fargate task, so
+  ONCET on the GPU costs a fraction of ONCET on CPU; LiNDDA on the GPU only costs more. The
+  first GPU step waits for an EC2 instance and the image pull (about a minute when the
+  compute node keeps a warm GPU instance, a few minutes from cold).
+- **Image size.** Before the variants, one CUDA image served both runtimes and every CPU run
+  pulled 3.8 GB (~94 s on Fargate). The cpu variant now pulls 0.43 GB. Locally,
+  `make image-cpu` builds the cpu image and `make image` the CUDA one.
 
 **What changes on the GPU.** The same models with the same weights and seeds; only the
 arithmetic differs. The forecasters (LiNDDA, NDD) are initialised and their training batches

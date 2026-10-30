@@ -2,11 +2,10 @@ FROM --platform=linux/amd64 python:3.12.16-slim-bookworm
 
 WORKDIR /processor
 
-# PyTorch build: cuda (default; what the platform builds) or cpu. The CUDA build runs on the gpu
-# runtime (NVIDIA T4) and, with no GPU visible, on CPU exactly as the CPU build does (DEVICE=auto),
-# so one image serves computeTypes [standard, gpu]; it is 3.8 GB compressed against 0.43 GB for
-# the cpu build (README "GPU"). The NVIDIA libraries come as pip wheels; the host driver is mounted
-# by the NVIDIA container runtime on the GPU instance.
+# PyTorch build: cpu or cuda. app.yml's variants set it (cpu variant: cpu, 0.43 GB compressed;
+# gpu variant: cuda, 3.8 GB; README "GPU"). The default stays cuda for a builder that passes no
+# build arguments: the CUDA build also runs on CPU (DEVICE=auto). The NVIDIA libraries come as
+# pip wheels; the host driver is mounted by the NVIDIA container runtime on the GPU instance.
 ARG TORCH_FLAVOUR=cuda
 
 # Pinned Python dependencies: binary wheels only, no apt packages.
