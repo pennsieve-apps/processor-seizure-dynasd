@@ -7,8 +7,8 @@ application:
     ECoG). Wraps DynaSD (Ojemann et al. 2026): a model of each recording's own pre-ictal
     dynamics (by default LiNDDA, a linear vector autoregressive forecaster) is fitted on the
     baseline, and the seizure is where the signals stop following it. Writes the recording-level
-    onset and, per channel, its onset time, whether it is recruited at onset, and a score. Runs
-    on CPU or, for the slow pretrained ONCET model, on the gpu runtime (DEVICE=auto).
+    onset and, per channel, its onset time, whether it is recruited at onset, and a score. Two
+    variants: CPU (LiNDDA by default) and GPU (the pretrained ONCET model on an NVIDIA T4).
   type: processor
   tags:
     - ieeg
@@ -23,14 +23,13 @@ runtime:
   # One recording at a time. On the demo (SEEG clips, 106-208 bipolar channels, 1024 Hz,
   # 5.6-7.7 min) on CPU LiNDDA takes 17-39 s per clip and peaks at 1.6 GB, NDD 29 s / 2.2 GB,
   # ONCET ~5 min / 1.8 GB (amd64 emulation on an M-series Mac; see README "Runtime").
-  # One image (CUDA PyTorch) for both runtimes: standard = CPU Fargate task; gpu = EC2 g4dn.xlarge
-  # (NVIDIA T4 16 GB, 4 vCPU, ~15 GB for tasks), where DEVICE=auto puts the models on the GPU.
-  # 4 vCPU / 8 GiB fits both (the gpu tier caps memory at 15360 MiB).
+  # Shared by both variants (below): cpu = CPU PyTorch on a standard Fargate task; gpu = CUDA
+  # PyTorch on EC2 g4dn.xlarge (NVIDIA T4 16 GB, 4 vCPU, ~15 GB for tasks), where DEVICE=auto
+  # puts the models on the GPU (the gpu tier caps memory at 15360 MiB).
   cpu: 4096
   memory: 8192
   computeTypes:
     - standard
-    - gpu
   timeoutSeconds: 14400
 parameters:
   - name: MODEL
@@ -156,3 +155,28 @@ outputs:
     mediaTypes:
       - text/csv
       - application/json
+# One repository, two images (docs: app-deploy-service docs/app-manifest-variants.md). The
+# Dockerfile's TORCH_FLAVOUR picks the PyTorch build: the cpu image is 0.43 GB compressed, the
+# CUDA one 3.8 GB, so CPU runs no longer pull the CUDA libraries.
+variants:
+  - id: cpu
+    name: CPU
+    default: true
+    description: CPU PyTorch on a standard task; LiNDDA, NDD and the slope detector are fast here.
+    build:
+      args:
+        TORCH_FLAVOUR: cpu
+    runtime:
+      computeTypes: [standard]
+  - id: gpu
+    name: GPU (ONCET)
+    description: CUDA PyTorch on an NVIDIA T4; runs the pretrained ONCET model by default (about 1 min per recording instead of 36 on CPU).
+    build:
+      args:
+        TORCH_FLAVOUR: cuda
+    runtime:
+      computeTypes: [gpu]
+      memory: 14336
+    parameters:
+      MODEL:
+        defaultValue: oncet
