@@ -1,5 +1,6 @@
 cff-version: "1.2.0"
-message: If you use this app, please cite it and the works it builds on, listed under references.
+message: >-
+  If you use this app, please cite the work it implements (preferred-citation), this release, and Pennsieve (RRID:SCR_021677); the other works it builds on are listed under references.
 type: software
 title: Seizure Onset (DynaSD)
 abstract: Seizure onset time and per-channel onset, recruitment and score from intracranial EEG, with DynaSD
@@ -17,6 +18,55 @@ keywords:
 - neuroscience
 - seizure-detection
 - seizure-onset
+# The work this app implements; the release report's "How to cite" puts it first.
+preferred-citation:
+  type: article
+  title: Unsupervised seizure annotation and detection with neural dynamic divergence
+  authors:
+  - family-names: Ojemann
+    given-names: William K.S.
+  - family-names: Xu
+    given-names: Zhongchuan
+  - family-names: Shi
+    given-names: Haoer
+  - family-names: Walsh
+    given-names: Katie
+  - family-names: Pattnaik
+    given-names: Akash
+  - family-names: Sinha
+    given-names: Nishant
+  - family-names: Lavelle
+    given-names: Sarah
+  - family-names: Aguila
+    given-names: Carlos
+  - family-names: Gallagher
+    given-names: Ryan
+  - family-names: Revell
+    given-names: Andrew
+  - family-names: LaRocque
+    given-names: Joshua J.
+  - family-names: Korzun
+    given-names: Jacob
+  - family-names: Kulick-Soper
+    given-names: Catherine V.
+  - family-names: Zhou
+    given-names: Daniel J.
+  - family-names: Galer
+    given-names: Peter D.
+  - family-names: Sinha
+    given-names: Saurabh R.
+  - family-names: Shinohara
+    given-names: Russell T.
+  - family-names: Davis
+    given-names: Kathryn A.
+  - family-names: Litt
+    given-names: Brian
+  - family-names: Conrad
+    given-names: Erin C.
+  year: 2026
+  journal: medRxiv
+  notes: Preprint, posted 2026-02-17.
+  doi: 10.64898/2026.02.15.26346325
 references:
 - type: article
   title: Unsupervised seizure annotation and detection with neural dynamic divergence
